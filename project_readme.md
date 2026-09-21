@@ -102,6 +102,15 @@ Frames with mismatched parity are rejected by the host controller before reachin
 4. **Launch the Live Dashboard:**
    * Open `dashboard.html` in any web browser to view the 4x5 coordinate canvas, system states, and lux levels in real time.
 
+  #### **Telemetry Verification: Coordinate (50, 30\)**
+
+The PSoC engine detects touch input at X: 50, Y: 30\. The RA0E3 host verifies packet parity and transitions to VERIFYING\_PIN. The ESP32 node serializes this frame to HiveMQ, while the HTML5 canvas renders the capacitive centroid:
+
+#### **Telemetry Verification: Coordinate (70, 40\) & Ambient ALS**
+
+As the finger translates across the 4x5 mutual-capacitance matrix to X: 70, Y: 40, real-time phototransistor lux readings (361–392 Lux) and proximity detection flags stream continuously through the broker:
+
+
 5. **Trigger Remote Lockdown (Cloud-to-Device Command):**
    * Using the HiveMQ Web Client, publish to topic: `master_project/industrial_hmi/commands`
    * Payload:
@@ -125,6 +134,15 @@ Tests direct inter-chip byte streaming over a virtual I2C link (TCP port 5000):
    ```bash
    python ra0e3_host_node.py
    ```
+#### **Bus Handshake & Normal State Execution**
+
+The Python sensor server listens on port 5000 (I2C Emulation). The RA0E3 host connects, processes valid register frames, and executes state machine steps (PIN\_ENTRY\_MODE, BUTTON\_0\_PRESS, BUTTON\_1\_PRESS):
+
+#### **Fault Injection & Checksum Rejection Verification**
+
+In **Step 05**, an EMI transient / bit-flip fault is deliberately injected on the simulated bus (Injected Event Mode: CORRUPT with raw checksum 0x24). The host controller catches the mismatch, halts state transitions, and discards the malformed packet:
+
+\[I2C Read FAIL\] Checksum mismatch\! Corrupted packet rejected (0x24)
 
 Validates state transitions (`PIN_ENTRY_MODE` -> `ACCESS_GRANTED_UNLOCKED`) and verifies rejection of deliberately corrupted frames (`[I2C Read FAIL] Checksum mismatch! Corrupted packet rejected`).
 
