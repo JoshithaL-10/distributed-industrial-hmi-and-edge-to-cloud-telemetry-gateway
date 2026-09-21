@@ -129,11 +129,3 @@ Tests direct inter-chip byte streaming over a virtual I2C link (TCP port 5000):
 Validates state transitions (`PIN_ENTRY_MODE` -> `ACCESS_GRANTED_UNLOCKED`) and verifies rejection of deliberately corrupted frames (`[I2C Read FAIL] Checksum mismatch! Corrupted packet rejected`).
 
 ---
-
-## 5. Master's CV / Technical Portfolio Entry
-
-* **Distributed Industrial HMI & Edge-to-Cloud Telemetry Gateway**
-  * Engineered a three-tier heterogeneous embedded architecture isolating capacitive acquisition (Infineon PSoC 4100T), deterministic safety interlocks (Renesas RA0E3 Cortex-M23), and cloud networking (ESP32).
-  * Implemented an inter-chip binary frame protocol with longitudinal XOR parity verification and liquid-droplet rejection algorithms.
-  * Developed a Software-in-the-Loop (SIL) simulation framework in Python and native C to validate bus protocols, edge state machines, and MQTT cloud communication prior to hardware fabrication.
-  * Built an interactive WebSocket-driven digital twin dashboard rendering 2D touch coordinates, ambient lux levels, and remote emergency lockdown commands in real time.
