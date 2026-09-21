@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Industrial HMI & Gateway - Digital Twin</title>
+  <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: #334155;
+      --text: #f8fafc;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --green: #22c55e;
+      --red: #ef4444;
+      --yellow: #eab308;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body { background: var(--bg); color: var(--text); padding: 24px; }
+    header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); padding-bottom: 16px; margin-bottom: 24px; }
+    h1 { font-size: 1.4rem; font-weight: 600; }
+    .badge { padding: 4px 10px; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; }
+    .badge.connected { background: rgba(34, 197, 94, 0.2); color: var(--green); border: 1px solid var(--green); }
+    .badge.disconnected { background: rgba(239, 68, 68, 0.2); color: var(--red); border: 1px solid var(--red); }
+    
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; }
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 20px; }
+    .card h2 { font-size: 0.9rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 12px; }
+    
+    .status-value { font-size: 1.5rem; font-weight: 700; margin-bottom: 8px; color: var(--accent); }
+    .event-value { font-size: 0.95rem; color: var(--text); word-break: break-all; }
+    
+    .metrics { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
+    .metric-row { display: flex; justify-content: space-between; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 6px; font-size: 0.9rem; }
+    .metric-label { color: var(--muted); }
+    .metric-val { font-weight: 600; }
+
+    /* Touchpad Coordinate Grid */
+    #pad-canvas { width: 100%; height: 160px; background: #090d16; border: 1px solid var(--border); border-radius: 8px; margin-top: 10px; display: block; }
+  </style>
+</head>
+<body>
+
+  <header>
+    <div>
+      <h1>Multi-MCU Industrial HMI Gateway</h1>
+      <p style="color: var(--muted); font-size: 0.85rem; margin-top: 4px;">Infineon PSoC 4100T &bull; Renesas RA0E3 &bull; ESP32 Telemetry</p>
+    </div>
+    <span id="conn-status" class="badge disconnected">Connecting...</span>
+  </header>
+
+  <div class="grid">
+    <!-- State Card -->
+    <div class="card">
+      <h2>Host Controller State (RA0E3)</h2>
+      <div id="state-val" class="status-value">STANDBY</div>
+      <div id="event-val" class="event-value">Waiting for bus traffic...</div>
+    </div>
+
+    <!-- Spatial Touchpad Canvas -->
+    <div class="card">
+      <h2>CapSense 4x5 Touchpad Surface</h2>
+      <canvas id="pad-canvas" width="280" height="160"></canvas>
+      <div style="font-size: 0.8rem; color: var(--muted); margin-top: 6px; display: flex; justify-content: space-between;">
+        <span>Origin (0,0)</span>
+        <span id="coord-label">X: --, Y: --</span>
+        <span>Max (100,100)</span>
+      </div>
+    </div>
+
+    <!-- Sensor Metrics Card -->
+    <div class="card">
+      <h2>Hardware Signals & Ambient</h2>
+      <div class="metrics">
+        <div class="metric-row">
+          <span class="metric-label">Proximity Field</span>
+          <span id="prox-val" class="metric-val">INACTIVE</span>
+        </div>
+        <div class="metric-row">
+          <span class="metric-label">Button 0 (Cleanroom Auth)</span>
+          <span id="btn-val" class="metric-val">RELEASED</span>
+        </div>
+        <div class="metric-row">
+          <span class="metric-label">Ambient Light (ALS)</span>
+          <span id="als-val" class="metric-val">-- lux</span>
+        </div>
+        <div class="metric-row">
+          <span class="metric-label">Inter-Chip CRC Parity</span>
+          <span id="bus-val" class="metric-val" style="color: var(--green);">--</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const brokerUrl = 'wss://broker.hivemq.com:8884/mqtt';
+    const topic = 'master_project/industrial_hmi/telemetry';
+    const connStatus = document.getElementById('conn-status');
+    const stateVal = document.getElementById('state-val');
+    const eventVal = document.getElementById('event-val');
+    const proxVal = document.getElementById('prox-val');
+    const btnVal = document.getElementById('btn-val');
+    const alsVal = document.getElementById('als-val');
+    const busVal = document.getElementById('bus-val');
+    const coordLabel = document.getElementById('coord-label');
+    const canvas = document.getElementById('pad-canvas');
+    const ctx = canvas.getContext('2d');
+
+    const client = mqtt.connect(brokerUrl);
+
+    client.on('connect', () => {
+      connStatus.textContent = 'Broker Connected';
+      connStatus.className = 'badge connected';
+      client.subscribe(topic);
+    });
+
+    client.on('error', () => {
+      connStatus.textContent = 'Disconnected';
+      connStatus.className = 'badge disconnected';
+    });
+
+    client.on('message', (t, payload) => {
+      try {
+        const data = JSON.parse(payload.toString());
+        stateVal.textContent = data.access_state;
+        
+        // Color status highlights
+        if (data.access_state.includes("UNLOCK")) stateVal.style.color = "var(--green)";
+        else if (data.access_state.includes("PROTECTED")) stateVal.style.color = "var(--yellow)";
+        else if (data.access_state.includes("PIN")) stateVal.style.color = "var(--accent)";
+        else stateVal.style.color = "var(--muted)";
+
+        eventVal.textContent = data.event;
+        busVal.textContent = data.bus_integrity;
+
+        // Metrics
+        proxVal.textContent = data.metrics.proximity ? "TRIGGERED (Active)" : "Clear";
+        proxVal.style.color = data.metrics.proximity ? "var(--accent)" : "var(--muted)";
+
+        btnVal.textContent = data.metrics.btn0 ? "PRESSED" : "Idle";
+        btnVal.style.color = data.metrics.btn0 ? "var(--green)" : "var(--muted)";
+
+        alsVal.textContent = `${data.metrics.als_lux} Lux`;
+
+        // Render Touch Point on 2D Pad
+        renderTouchPad(data.metrics.touchpad_active, data.metrics.x, data.metrics.y);
+      } catch (err) {
+        console.error("Payload decode error:", err);
+      }
+    });
+
+    function renderTouchPad(active, x, y) {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      
+      // Draw grid lines (4 columns, 5 rows)
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.08)";
+      ctx.lineWidth = 1;
+      for (let i = 1; i < 4; i++) {
+        ctx.beginPath();
+        ctx.moveTo((canvas.width / 4) * i, 0);
+        ctx.lineTo((canvas.width / 4) * i, canvas.height);
+        ctx.stroke();
+      }
+      for (let j = 1; j < 5; j++) {
+        ctx.beginPath();
+        ctx.moveTo(0, (canvas.height / 5) * j);
+        ctx.lineTo(canvas.width, (canvas.height / 5) * j);
+        ctx.stroke();
+      }
+
+      if (active) {
+        const normX = (x / 100) * canvas.width;
+        const normY = (y / 100) * canvas.height;
+
+        ctx.fillStyle = "#38bdf8";
+        ctx.beginPath();
+        ctx.arc(normX, normY, 10, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.strokeStyle = "rgba(56, 189, 248, 0.4)";
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.arc(normX, normY, 18, 0, Math.PI * 2);
+        ctx.stroke();
+
+        coordLabel.textContent = `X: ${x}, Y: ${y}`;
+      } else {
+        coordLabel.textContent = `X: --, Y: --`;
+      }
+    }
+  </script>
+</body>
+</html>
